@@ -1,5 +1,4 @@
 
-#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -25,7 +24,12 @@ enum keys {
 	PAGE_UP,
 	PAGE_DOWN,
 	HOME_KEY,
-	END_KEY
+	END_KEY,
+	TEST_KEY,
+	CONTROL_UP,
+	CONTROL_DOWN,
+	CONTROL_LEFT,
+	CONTROL_RIGHT
 };
 
 struct termios settings;
@@ -36,7 +40,8 @@ struct editorRow {
 };
 
 struct editorConfig {
-	int cursorX, cursorY, xOffset, numRows, desiredX;
+	int cursorX, cursorY, xOffset, numRows, desiredX, yOffset;
+	bool fileOpen;
 	struct winsize screenSize;
 	std::vector<editorRow> row;
 };
@@ -95,14 +100,14 @@ void drawRows() {
 				appendBuffer(message);
 			}
 		} else {
-			//if (config.row[i].length > config.screenSize.ws_col) config.row[i].text = config.row[i].text.substr(0, config.screenSize.ws_col);
-			appendBuffer(config.row[i].text);
+			appendBuffer("\x1b[K");
+			appendBuffer(config.row[i + config.yOffset].text);
 		}
-		appendBuffer("\x1b[K");
+
 		if (i < config.screenSize.ws_row - 1) appendBuffer("\r\n");
 		if (i == config.screenSize.ws_row - 1) {
 			appendBuffer("\x1b[2K");
-			string cursor = string("[") + std::to_string(config.cursorY) + string(",") + std::to_string(config.cursorX) + string("]");
+			string cursor = string("[") + std::to_string(config.cursorY + config.yOffset) + string(",") + std::to_string(config.cursorX) + string("]");
 			appendBuffer(string(string("\x1b[" + std::to_string(config.screenSize.ws_col - cursor.length()) + string("G"))));
 			appendBuffer(cursor);
 		}
@@ -126,6 +131,7 @@ void init() {
 	config.numRows = 0;
 	config.desiredX = 3;
 	config.xOffset = 3;
+	config.yOffset = 0;
 	config.cursorY = 1;
 	config.cursorX = config.xOffset;
 
@@ -165,13 +171,11 @@ void openEditor(string fileLocation) {
 	while (std::getline(file, text)) {
 		//Replace tabs with spaces
 		string find = "\t", replace = "   ";
-		if (text.find("\t") != string::npos) text.replace(text.find(find), 3, replace);
+		if (text.find("\t") != string::npos) text.replace(text.find(find), 1, replace);
 
 		config.row.push_back({text, static_cast<int>(text.size())});
 		config.numRows++;
 	}
-		std::cout << config.row.size();
-
 }
 
 char readKey() {
@@ -185,7 +189,6 @@ char readKey() {
 
 		if (read(STDOUT_FILENO, &seq[0], 1) == -1) return '\x1b';
 		if (read(STDOUT_FILENO, &seq[1], 1) == -1) return '\x1b';
-
 		if (seq[1] >= '0' && seq[1] <= '9') {
 			if (read(STDOUT_FILENO, &seq[2], 1) == -1) return '\x1b';
 			if (seq[2] == '~') {
@@ -211,6 +214,21 @@ char readKey() {
 					return HOME_KEY;
 				case 'F':
 					return END_KEY;
+				case '1':
+					char chars[3];
+					read(STDOUT_FILENO, &chars[0], 1);
+					read(STDOUT_FILENO, &chars[0], 1);
+					switch (chars[0]) {
+						case 'A':
+							return CONTROL_UP;
+						case 'B':
+							return CONTROL_DOWN;
+						case 'C':
+							return CONTROL_RIGHT;
+						case 'D':
+							return CONTROL_LEFT;
+					}
+				break;
 				default:
 					break;
 			}
@@ -228,21 +246,30 @@ void processKey() {
 			exit(0);
 			break;
 		case UP_KEY:
-			if (config.cursorY > 1) config.cursorY--;
-			if (config.desiredX > config.row[config.cursorY - 1].length) {
-				config.cursorX = config.row[config.cursorY - 1].length + config.xOffset;
-			} else {
-				config.cursorX = config.desiredX;
-			}
-			break;
-		case DOWN_KEY:
-			if (config.cursorY < config.screenSize.ws_row - 1) {
-				config.cursorY++;
-				if (config.desiredX > config.row[config.cursorY - 1].length) {
-					config.cursorX = config.row[config.cursorY - 1].length + config.xOffset;
+			//Move cursor up.
+			if (config.cursorY > 1 && config.fileOpen) {
+				config.cursorY--;
+				if (config.desiredX > config.row[(config.cursorY + config.yOffset) - 1].length) {
+					config.cursorX = config.row[(config.cursorY + config.yOffset) - 1].length + config.xOffset;
 				} else {
 					config.cursorX = config.desiredX;
 				}
+			} else if (config.cursorY + config.yOffset > 1) {
+				config.yOffset--;
+			}
+			break;
+		case DOWN_KEY:
+			//Move cursor down.
+			if (config.cursorY < config.screenSize.ws_row - 1 && config.fileOpen) {
+				config.cursorY++;
+			} else if ((config.cursorY + config.yOffset) < config.numRows) {
+				config.yOffset++;
+			}
+			//Store desired position
+			if (config.desiredX > config.row[(config.cursorY - 1 + config.yOffset)].length) {
+				config.cursorX = config.row[(config.cursorY - 1 + config.yOffset)].length + config.xOffset;
+			} else {
+				config.cursorX = config.desiredX;
 			}
 			break;
 		case LEFT_KEY:
@@ -250,31 +277,42 @@ void processKey() {
 			config.desiredX = config.cursorX;
 			break;
 		case RIGHT_KEY:
-			if (config.cursorX < config.row[config.cursorY - 1].length + config.xOffset) {
+			if ((config.cursorX < config.row[config.cursorY - 1 + config.yOffset].length + config.xOffset)) {
 				config.cursorX++;
+				config.desiredX = config.cursorX;
 			}
-			config.desiredX = config.cursorX;
 			break;
 		case PAGE_UP:
-			config.cursorY = 0;
+			config.cursorY = 1;
 			break;
 		case PAGE_DOWN:
-			config.cursorY = config.screenSize.ws_row - 1;
+			if (config.fileOpen) config.cursorY = config.screenSize.ws_row - 1;
 			break;
 		case HOME_KEY:
 			config.cursorX = config.xOffset;
+			config.desiredX = config.xOffset;
 			break;
 		case END_KEY:
 			config.cursorX = config.row[config.cursorY - 1].length + config.xOffset;
 			config.desiredX = config.cursorX;
 			break;
+		case CONTROL_UP: break; //WIP
+		case CONTROL_DOWN: break; //WIP
+		case CONTROL_LEFT: break; //WIP
+		case CONTROL_RIGHT: break; //WIP
 		default: break;
 	}
 }
 
 int main (int argc, char *argv[]) {
 	init();
-	openEditor(argv[1]);
+	if (argc > 1) {
+		config.fileOpen = true;
+		openEditor(argv[1]);
+	} else {
+		config.row.push_back({"", 0});
+
+	}
 	enableRawMode();
 	
 	//printf("bruh");
