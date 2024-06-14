@@ -2,34 +2,28 @@
 #include "Global.hpp"
 #include "App.hpp"
 #include <algorithm>
-#include <cerrno>
-#include <cstdlib>
 #include <iostream>
-#include <ostream>
 #include <termios.h>
-#include <unistd.h>
-#include <stdlib.h>
 
 #define CTRL_KEY(key) ((key) & 0x1f)
 
-struct termios originalSettings;
+//Needs to be defined here, because the 'atexit' function only accepts functions that aren't associated to a class(includes variables in functions)
+struct termios originalSettings, m_settings;
 
-enum keys {
-	UP_KEY = 'k',
-	DOWN_KEY = 'j',
-	LEFT_KEY = 'h',
-	RIGHT_KEY = 'l',
-	PAGE_UP,
-	PAGE_DOWN,
-	HOME_KEY,
-	END_KEY,
-	TEST_KEY,
-	CONTROL_UP,
-	CONTROL_DOWN,
-	CONTROL_LEFT,
-	CONTROL_RIGHT,
-	ESCAPE_KEY = 27
-};
+void updateDesiredX() {
+	if (config.desiredX == config.cursorX || config.row[config.cursorY + config.yOffset - 1].length == 0) {return;}
+	
+	if (config.cursorX == config.row[(config.cursorY - 1 + config.yOffset)].length + config.xOffset && config.desiredX > config.cursorX) return;
+	config.desiredX = config.cursorX;
+}
+
+void setCursorToDesiredPos() {
+	if (config.desiredX > config.row[(config.cursorY + config.yOffset) - 1].length) {
+		config.cursorX = config.row[(config.cursorY + config.yOffset) - 1].length + config.xOffset;
+	} else {
+		config.cursorX = config.desiredX;
+	}
+}
 
 void Input::enableRawMode() {
 	if (tcgetattr(STDIN_FILENO, &originalSettings) == -1)
@@ -38,7 +32,7 @@ void Input::enableRawMode() {
 	atexit([]() {tcsetattr(STDIN_FILENO, TCSAFLUSH, &originalSettings);});
 	write(STDOUT_FILENO, "\x1b[?1049h", 9);
 
-	m_settings = m_originalSettings;
+	m_settings = originalSettings;
 
 	//ECHO stops ahowing the chararcter typed in, ICANON reads input by char, ISIG disables ctrl-z and ctrl-c from stopping the program
 	//IEXTEN diables the ctrl-v command, last two are misc. flags
@@ -132,69 +126,51 @@ void Input::processKeys() {
 			} else if (config.cursorY + config.yOffset > 1) {
 				config.yOffset--;
 			}
-			if (config.desiredX > config.row[(config.cursorY + config.yOffset) - 1].length) {
-				config.cursorX = config.row[(config.cursorY + config.yOffset) - 1].length + config.xOffset;
-			} else {
-				config.cursorX = config.desiredX;
-			}
+
+			setCursorToDesiredPos();
 			break;
 		case DOWN_KEY:
-			if (config.row[0].text == "" && config.numRows == 1) break;
-			if (config.numRows > config.screenSize.ws_row && config.cursorY < config.screenSize.ws_row - 1 && config.fileOpen && config.numRows > 1) {
+			if (config.row[0].text == "" && config.numRows == 1 || (config.cursorY + config.yOffset) == config.numRows) break;
+			if (config.cursorY < config.screenSize.ws_row - 1 && config.fileOpen && config.numRows > 1) {
 				config.cursorY++;
 			} else if (config.numRows > config.screenSize.ws_row && (config.cursorY + config.yOffset) < config.numRows && config.numRows > 2) {
 				config.yOffset++;
 			} else if (config.numRows < config.screenSize.ws_col && config.cursorY < config.numRows - 1) {
 				config.cursorY++;
 			}
-			//Store desired position
-			if (config.desiredX > config.row[(config.cursorY - 1 + config.yOffset)].length) {
-				config.cursorX = config.row[(config.cursorY - 1 + config.yOffset)].length + config.xOffset;
-			} else {
-				config.cursorX = config.desiredX;
-			}
+
+			setCursorToDesiredPos();
 			break;
 		case LEFT_KEY:
 			if (config.cursorX > config.xOffset) config.cursorX--;
-			if (config.row[config.cursorY + config.yOffset - 1].text != "") config.desiredX = config.cursorX;
 			break;
 		case RIGHT_KEY:
 			if ((config.cursorX < config.row[config.cursorY - 1 + config.yOffset].length + config.xOffset)) {
 				config.cursorX++;
 			}
-			if (config.row[config.cursorY + config.yOffset - 1].length != 0) config.desiredX = config.cursorX;
 			break;
 		case PAGE_UP:
 			config.cursorY = 1;
-			if (config.desiredX < config.row[config.cursorY + config.yOffset - 1].length) {
-				config.cursorX = config.desiredX;
-			} else {
-				config.cursorX = config.row[config.cursorY + config.yOffset - 1].length + config.xOffset, config.desiredX = config.cursorX;
-			}
+			setCursorToDesiredPos();
 			break;
 		case PAGE_DOWN:
-			if (config.fileOpen) config.cursorY = config.screenSize.ws_row - 1;
-			if (config.desiredX < config.row[config.cursorY + config.yOffset - 1].length) {
-				config.cursorX = config.desiredX;
-			} else {
-				config.cursorX = config.row[config.cursorY + config.yOffset - 1].length + config.xOffset, config.desiredX = config.cursorX;
-			}
+			if (config.fileOpen && config.numRows >= config.screenSize.ws_row) config.cursorY = config.screenSize.ws_row - 1;
+			if (config.numRows < config.screenSize.ws_col) config.cursorY = config.numRows;
+			setCursorToDesiredPos();
 			break;
 		case HOME_KEY:
-			config.cursorX = config.xOffset, config.desiredX = config.cursorX;
+			config.cursorX = config.xOffset;
 			break;
 		case END_KEY:
-			config.cursorX = config.row[config.cursorY + config.yOffset - 1].length + config.xOffset, config.desiredX = config.cursorX;
+			config.cursorX = config.row[config.cursorY + config.yOffset - 1].length + config.xOffset;
 			break;
 		case 'w':
 		case CONTROL_RIGHT:
 			moveCursorByWord(1);
-			config.desiredX = config.cursorX;
 			break; //WIP
 		case 'b':
 		case CONTROL_LEFT:
 			moveCursorByWord(-1);
-			config.desiredX = config.cursorX;
 			break;
 		case ':':
 			config.editorMode = COMMAND;
@@ -207,6 +183,7 @@ void Input::processKeys() {
 			break;
 		default: break;
 	}
+	updateDesiredX();
 }
 
 void Input::moveCursorByWord(int direction) {
@@ -222,7 +199,7 @@ void Input::moveCursorByWord(int direction) {
 		} else {
 			if (spaceIndex + config.xOffset + 1 < config.cursorX) {
 				config.cursorX += spaceIndex + 1;
-			return;
+				return;
 			}
 			config.cursorX = config.cursorX  - config.xOffset + spaceIndex + config.xOffset + 1;
 			//debugMessage = text.substr(config.cursorX - config.xOffset + 1, text.length()) + "   " + std::to_std::string(text.length());
@@ -235,18 +212,17 @@ void Input::moveCursorByWord(int direction) {
 
 		if (spaceIndex == std::string::npos)  {
 			config.cursorX = config.xOffset;
-			debugMessage = "rare";
 			return;
 		} else {
-			debugMessage = "";
 			if (config.cursorX == spaceIndex + config.xOffset + 1) {
 				spaceIndex = text->substr(0, config.cursorX - config.xOffset - 2).find_last_of(" ");
 				config.cursorX = spaceIndex + config.xOffset + 1;
 			} else {
 				config.cursorX = spaceIndex + config.xOffset + 1;
 			}
-				if (config.cursorX < config.xOffset) config.cursorX = config.xOffset;
-				return;
+
+			if (config.cursorX < config.xOffset) config.cursorX = config.xOffset;
+			return;
 			
 		}
 
