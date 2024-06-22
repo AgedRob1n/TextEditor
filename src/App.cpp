@@ -1,11 +1,12 @@
 #include "App.hpp"
+#include "Config.hpp"
 #include "Input.hpp"
 #include "Draw.hpp"
 #include "Global.hpp"
 #include <fstream>
-#include <string>
 
 using std::string;
+Config conf;
 
 void App::exitProgram(const char *error) {
 	write(STDOUT_FILENO, "\x1b[?1049l", 9);
@@ -30,9 +31,9 @@ void App::openEditor(const char *location) {
 		}
 
 		//Temporarily just clip the line until either scrolling or nvim style handling is implemented.
-		if (text.length() > config.screenSize.ws_col) text = text.substr(0, config.screenSize.ws_col - 3);
-		config.row.push_back({text, static_cast<int>(text.size())});
-		config.numRows++;
+		if (text.length() > state.screenSize.ws_col) text = text.substr(0, state.screenSize.ws_col - 3);
+		state.row.push_back({text, static_cast<int>(text.size())});
+		state.numRows++;
 	}
 
 	file.close();
@@ -41,17 +42,24 @@ void App::openEditor(const char *location) {
 App::App(int argc, char *argv[]) {
 	m_input = new Input;
 	m_draw = new Draw;
+	conf = Config();
+	conf.initLua();
+	conf.getVars();
 	
   if (argc > 1) {
     openEditor(argv[1]);
-    config.fileName = argv[1];
-    config.fileOpen = true;
+		state.xOffset = Draw::getDigits(state.numRows) + 2;
+		state.cursorX = state.xOffset;
+		state.desiredX = state.cursorX;
+    state.fileName = argv[1];
+    state.fileOpen = true;
   } else {
-    config.row.push_back({"", 0});
+    state.row.push_back({"", 0});
   }
-  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &config.screenSize))
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &state.screenSize))
     App::exitProgram("Get Window Size");
 	m_input->enableRawMode();
+
 
 	while (1) {
 		update();

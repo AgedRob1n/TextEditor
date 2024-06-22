@@ -25,6 +25,6 @@ struct editorConfig {
 	std::string fileName;
 };
 
-inline editorConfig config;
+inline editorConfig state;
 inline Buffer buffer;
 

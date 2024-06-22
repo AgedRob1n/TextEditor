@@ -3,7 +3,9 @@
 #include "App.hpp"
 #include <algorithm>
 #include <iostream>
+#include <string>
 #include <termios.h>
+///
 
 #define CTRL_KEY(key) ((key) & 0x1f)
 
@@ -11,17 +13,20 @@
 struct termios originalSettings, m_settings;
 
 void updateDesiredX() {
-	if (config.desiredX == config.cursorX || config.row[config.cursorY + config.yOffset - 1].length == 0) {return;}
+	if (state.desiredX == state.cursorX || state.row[state.cursorY + state.yOffset - 1].length == 0) {return;}
 	
-	if (config.cursorX == config.row[(config.cursorY - 1 + config.yOffset)].length + config.xOffset && config.desiredX > config.cursorX) return;
-	config.desiredX = config.cursorX;
+	if (state.cursorX == state.row[(state.cursorY - 1 + state.yOffset)].length + state.xOffset && state.desiredX > state.cursorX) return;
+	state.desiredX = state.cursorX;
 }
 
 void setCursorToDesiredPos() {
-	if (config.desiredX > config.row[(config.cursorY + config.yOffset) - 1].length) {
-		config.cursorX = config.row[(config.cursorY + config.yOffset) - 1].length + config.xOffset;
+	int rowLength = state.row[state.cursorY + state.yOffset - 1].length;
+	if (state.desiredX > rowLength && rowLength != 3 && rowLength != 1) {
+		state.cursorX = rowLength + state.xOffset;
+		debugMessage = std::to_string(rowLength);
 	} else {
-		config.cursorX = config.desiredX;
+		debugMessage = "huh";
+		state.cursorX = state.desiredX;
 	}
 }
 
@@ -121,48 +126,48 @@ void Input::processKeys() {
 			break;
 		case UP_KEY:
 			//Move cursor up//Move cursor up.
-			if (config.cursorY > 1 && config.fileOpen) {
-				config.cursorY--;
-			} else if (config.cursorY + config.yOffset > 1) {
-				config.yOffset--;
+			if (state.cursorY > 1 && state.fileOpen) {
+				state.cursorY--;
+			} else if (state.cursorY + state.yOffset > 1) {
+				state.yOffset--;
 			}
 
 			setCursorToDesiredPos();
 			break;
 		case DOWN_KEY:
-			if (config.row[0].text == "" && config.numRows == 1 || (config.cursorY + config.yOffset) == config.numRows) break;
-			if (config.cursorY < config.screenSize.ws_row - 1 && config.fileOpen && config.numRows > 1) {
-				config.cursorY++;
-			} else if (config.numRows > config.screenSize.ws_row && (config.cursorY + config.yOffset) < config.numRows && config.numRows > 2) {
-				config.yOffset++;
-			} else if (config.numRows < config.screenSize.ws_col && config.cursorY < config.numRows - 1) {
-				config.cursorY++;
+			if (state.row[0].text == "" && state.numRows == 1 || (state.cursorY + state.yOffset) == state.numRows) break;
+			if (state.cursorY < state.screenSize.ws_row - 1 && state.fileOpen && state.numRows > 1) {
+				state.cursorY++;
+			} else if (state.numRows > state.screenSize.ws_row && (state.cursorY + state.yOffset) < state.numRows && state.numRows > 2) {
+				state.yOffset++;
+			} else if (state.numRows < state.screenSize.ws_col && state.cursorY < state.numRows - 1) {
+				state.cursorY++;
 			}
 
 			setCursorToDesiredPos();
 			break;
 		case LEFT_KEY:
-			if (config.cursorX > config.xOffset) config.cursorX--;
+			if (state.cursorX > state.xOffset) state.cursorX--;
 			break;
 		case RIGHT_KEY:
-			if ((config.cursorX < config.row[config.cursorY - 1 + config.yOffset].length + config.xOffset)) {
-				config.cursorX++;
+			if ((state.cursorX < state.row[state.cursorY - 1 + state.yOffset].length + state.xOffset)) {
+				state.cursorX++;
 			}
 			break;
 		case PAGE_UP:
-			config.cursorY = 1;
+			state.cursorY = 1;
 			setCursorToDesiredPos();
 			break;
 		case PAGE_DOWN:
-			if (config.fileOpen && config.numRows >= config.screenSize.ws_row) config.cursorY = config.screenSize.ws_row - 1;
-			if (config.numRows < config.screenSize.ws_col) config.cursorY = config.numRows;
+			if (state.fileOpen && state.numRows >= state.screenSize.ws_row) state.cursorY = state.screenSize.ws_row - 1;
+			if (state.numRows < state.screenSize.ws_col) state.cursorY = state.numRows;
 			setCursorToDesiredPos();
 			break;
 		case HOME_KEY:
-			config.cursorX = config.xOffset;
+			state.cursorX = state.xOffset;
 			break;
 		case END_KEY:
-			config.cursorX = config.row[config.cursorY + config.yOffset - 1].length + config.xOffset;
+			state.cursorX = state.row[state.cursorY + state.yOffset - 1].length + state.xOffset;
 			break;
 		case 'w':
 		case CONTROL_RIGHT:
@@ -173,13 +178,13 @@ void Input::processKeys() {
 			moveCursorByWord(-1);
 			break;
 		case ':':
-			config.editorMode = COMMAND;
+			state.editorMode = COMMAND;
 			break;
 		case ESCAPE_KEY:
-			config.editorMode = NORMAL;
+			state.editorMode = NORMAL;
 			break;
 		case 'i':
-			config.editorMode = INSERT;
+			state.editorMode = INSERT;
 			break;
 		default: break;
 	}
@@ -187,41 +192,41 @@ void Input::processKeys() {
 }
 
 void Input::moveCursorByWord(int direction) {
-	std::string *text = &config.row[config.cursorY + config.yOffset - 1].text;
+	std::string *text = &state.row[state.cursorY + state.yOffset - 1].text;
 	if (*text == "") return;
 	int spaceCount = std::count(text->begin(), text->end(), ' ');
 	if (direction == 1) {
-		std::string textFromCursor = text->substr(config.cursorX - config.xOffset, text->length());
+		std::string textFromCursor = text->substr(state.cursorX - state.xOffset, text->length());
 		size_t spaceIndex = textFromCursor.find_first_of(" ");
 
 		if (spaceIndex == std::string::npos)  {
-			config.cursorX = text->length() + config.xOffset;
+			state.cursorX = text->length() + state.xOffset;
 		} else {
-			if (spaceIndex + config.xOffset + 1 < config.cursorX) {
-				config.cursorX += spaceIndex + 1;
+			if (spaceIndex + state.xOffset + 1 < state.cursorX) {
+				state.cursorX += spaceIndex + 1;
 				return;
 			}
-			config.cursorX = config.cursorX  - config.xOffset + spaceIndex + config.xOffset + 1;
-			//debugMessage = text.substr(config.cursorX - config.xOffset + 1, text.length()) + "   " + std::to_std::string(text.length());
+			state.cursorX = state.cursorX  - state.xOffset + spaceIndex + state.xOffset + 1;
+			//debugMessage = text.substr(state.cursorX - state.xOffset + 1, text.length()) + "   " + std::to_std::string(text.length());
 		}
 	} else {
-		if (config.cursorX == config.xOffset) return;
-		std::string textFromCursor = text->substr(0, config.cursorX - config.xOffset);
+		if (state.cursorX == state.xOffset) return;
+		std::string textFromCursor = text->substr(0, state.cursorX - state.xOffset);
 		size_t spaceIndex = textFromCursor.find_last_of(" ");
 		if (textFromCursor.find_first_not_of(" ") == std::string::npos) return;
 
 		if (spaceIndex == std::string::npos)  {
-			config.cursorX = config.xOffset;
+			state.cursorX = state.xOffset;
 			return;
 		} else {
-			if (config.cursorX == spaceIndex + config.xOffset + 1) {
-				spaceIndex = text->substr(0, config.cursorX - config.xOffset - 2).find_last_of(" ");
-				config.cursorX = spaceIndex + config.xOffset + 1;
+			if (state.cursorX == spaceIndex + state.xOffset + 1) {
+				spaceIndex = text->substr(0, state.cursorX - state.xOffset - 2).find_last_of(" ");
+				state.cursorX = spaceIndex + state.xOffset + 1;
 			} else {
-				config.cursorX = spaceIndex + config.xOffset + 1;
+				state.cursorX = spaceIndex + state.xOffset + 1;
 			}
 
-			if (config.cursorX < config.xOffset) config.cursorX = config.xOffset;
+			if (state.cursorX < state.xOffset) state.cursorX = state.xOffset;
 			return;
 			
 		}
@@ -229,3 +234,4 @@ void Input::moveCursorByWord(int direction) {
 	}
 
 }
+
